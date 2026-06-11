@@ -25,7 +25,13 @@ account.transfer(destination, amount, accountRepository);
 // Testing must mock accountRepository, or spin up a database
 ```
 
-This project completely separates **computation** from **side effects**. Every business decision is a pure static function — it accepts fixed-size scalar facts as input and returns complete computed results as output. To test "savings accounts cannot overdraw," you write:
+This project does not start from entity classes, repository interfaces, or layer abstractions. Instead, for each business rule, you work in three steps:
+
+1. **Gather** — pick one concrete business operation (e.g. "what fees apply to a transfer?"). Pull all the variables, conditions, data reads, and state changes it touches into one view. Don't name or classify anything yet — just make the dependencies visible.
+2. **Split** — what computes (pure math) vs what touches the outside world (reading rules from DB, writing logs). The computation becomes a `static` method with plain inputs and plain outputs.
+3. **Name** — the unit that remains after gathering and splitting gets named after the responsibility it holds: `TransferFeeDecision`, `InterestCalculationDecision`, etc.
+
+For example, to test "savings accounts cannot overdraw":
 
 ```java
 // Pure-function architecture — zero dependencies, zero mocks
@@ -306,7 +312,13 @@ account.transfer(destination, amount, accountRepository);
 // 测试必须 mock accountRepository，或者启动数据库
 ```
 
-本项目把**计算**和**副作用**彻底分离。所有业务判断是纯静态函数——输入固定大小的标量事实，输出完整的计算结果。要测试"储蓄账户不允许透支"这条规则，只需：
+本项目不从 Entity 类、Repository 接口、或分层抽象开始。对每条业务规则，按三步走：
+
+1. **收拢** — 选一条具体的业务操作（比如"一笔转账要收哪些费用？"），把跟它相关的变量、条件、数据读取、状态变更全部拉到同一视图中。先不命名、不分类、不抽象——只管让依赖关系暴露出来。
+2. **拆分** — 收拢之后，自然分成两堆：纯计算（算术、判断）和副作用（读数据库规则、写日志）。计算部分变成 static 方法，输入输出都是纯数据。
+3. **命名** — 收拢拆分后剩下的那个东西，按它承担的职责叫名字：TransferFeeDecision、InterestCalculationDecision 等。
+
+例如，判断储蓄账户转账是否允许：
 
 ```java
 // 纯函数架构 —— 零依赖，零 Mock
