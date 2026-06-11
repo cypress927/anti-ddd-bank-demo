@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bank Demo — Anti-OOP Architecture</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+
+<header>
+    <h1>🏦 Bank Demo</h1>
+    <span class="subtitle">Pure-function architecture · JPA + SQLite</span>
+</header>
+
+<main>
+    <!-- ===== Client Identity (shared by all client operations) ===== -->
+    <section class="card" id="identity-card">
+        <h2>👤 Client Identity</h2>
+        <p class="hint">Set your username here. All /client operations send it as <code>X-Username</code> header.</p>
+        <div class="form-row">
+            <input type="text" id="my-username" placeholder="Your username (e.g. jack)" autocomplete="off">
+        </div>
+    </section>
+
+    <!-- ===== Banker Operations ===== -->
+    <section class="card">
+        <h2>🏛️ Banker — Client Management</h2>
+
+        <!-- Create client -->
+        <div class="op">
+            <h3>Create Client</h3>
+            <div class="form-row">
+                <input type="text" id="create-username" placeholder="Username (e.g. jack)">
+                <input type="text" id="create-birthdate" placeholder="Birth date (yyyy-mm-dd)">
+                <button id="btn-create-client">Create</button>
+            </div>
+            <div class="result" id="create-client-result"></div>
+        </div>
+
+        <!-- Delete client -->
+        <div class="op">
+            <h3>Delete Client</h3>
+            <div class="form-row">
+                <input type="text" id="delete-username" placeholder="Username to delete">
+                <button id="btn-delete-client">Delete</button>
+            </div>
+            <div class="result" id="delete-client-result"></div>
+        </div>
+
+        <!-- List / search clients -->
+        <div class="op">
+            <h3>Find Clients</h3>
+            <div class="form-row">
+                <input type="text" id="find-from-birth" placeholder="From birth (yyyy-mm-dd, optional)">
+                <input type="text" id="find-min-balance" placeholder="Min balance (optional)">
+                <button id="btn-find-clients">Search</button>
+                <button id="btn-find-all" class="secondary">List All</button>
+            </div>
+            <div class="result" id="find-clients-result"></div>
+        </div>
+    </section>
+
+    <!-- ===== Client Operations ===== -->
+    <section class="card">
+        <h2>💳 Client — Account Operations</h2>
+
+        <!-- Create account -->
+        <div class="op">
+            <h3>Create Account</h3>
+            <div class="form-row">
+                <input type="text" id="acct-name" placeholder="Account name (e.g. My Savings)">
+                <button id="btn-create-account">Create</button>
+            </div>
+            <div class="result" id="create-account-result"></div>
+        </div>
+
+        <!-- Deposit -->
+        <div class="op">
+            <h3>Deposit</h3>
+            <div class="form-row">
+                <input type="number" id="dep-acct-no" placeholder="Account number" min="1">
+                <input type="number" id="dep-amount" placeholder="Amount (EUR)" min="0.01" step="0.01">
+                <button id="btn-deposit">Deposit</button>
+            </div>
+            <div class="result" id="deposit-result"></div>
+        </div>
+
+        <!-- Transfer -->
+        <div class="op">
+            <h3>Transfer</h3>
+            <div class="form-row">
+                <input type="number" id="xfer-src" placeholder="Source account no." min="1">
+                <input type="number" id="xfer-dst" placeholder="Destination account no." min="1">
+                <input type="number" id="xfer-amount" placeholder="Amount (EUR)" min="0.01" step="0.01">
+                <button id="btn-transfer">Transfer</button>
+            </div>
+            <div class="result" id="transfer-result"></div>
+        </div>
+
+        <!-- Add account manager -->
+        <div class="op">
+            <h3>Add Account Manager</h3>
+            <div class="form-row">
+                <input type="number" id="mgr-acct-no" placeholder="Account number" min="1">
+                <input type="text" id="mgr-username" placeholder="Manager username">
+                <button id="btn-add-manager">Add Manager</button>
+            </div>
+            <div class="result" id="add-manager-result"></div>
+        </div>
+
+        <!-- Accounts report -->
+        <div class="op">
+            <h3>My Accounts Report</h3>
+            <button id="btn-report">Show Report</button>
+            <pre class="result" id="report-result"></pre>
+        </div>
+    </section>
+</main>
+
+<script src="/app.js"></script>
+</body>
+</html>

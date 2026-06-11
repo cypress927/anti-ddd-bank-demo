@@ -11,17 +11,16 @@ import java.util.Optional;
 /**
  * Spring Data JPA repository for ClientEntity — PURE INFRASTRUCTURE.
  * Query method names are mechanically derived from storage fields.
- * No business judgment here.
+ *
+ * NOTE: no existsBy* methods — they generate FETCH FIRST which SQLite doesn't support.
+ * The Stores project existence facts mechanically from find* + isPresent().
  */
 @Repository
 interface ClientJpaRepo extends JpaRepository<ClientEntity, Long> {
 
     Optional<ClientEntity> findByUsername(String username);
 
-    boolean existsByUsername(String username);
-
     List<ClientEntity> findAllByOrderByIdDesc();
 
-    /** Young clients: born at or after minDate, ordered by age ascending. */
     List<ClientEntity> findAllByBirthDateGreaterThanEqualOrderByBirthDateDescIdDesc(LocalDate minDate);
 }

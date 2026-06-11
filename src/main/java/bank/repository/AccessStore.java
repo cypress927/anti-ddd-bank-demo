@@ -52,7 +52,7 @@ public class AccessStore {
 
     /** Projects "owns any account" → single boolean for the pure function. */
     public boolean ownsAnyAccount(long clientId) {
-        return repo.existsByClientIdAndIsOwnerTrue(clientId);
+        return repo.countByClientIdAndIsOwnerTrue(clientId) > 0;
     }
 
     public List<AccessFact> findByClient(long clientId) {

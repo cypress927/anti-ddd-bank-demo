@@ -38,7 +38,7 @@ public class ClientStore {
 
     /** Projects source data into a single boolean fact — the pure function needs nothing more. */
     public boolean existsByUsername(String username) {
-        return repo.existsByUsername(username);
+        return repo.findByUsername(username).isPresent();
     }
 
     public List<ClientFact> findAll() {
