@@ -12,6 +12,8 @@
 **A banking system redesigned with pure-function architecture — every complex business rule is fully testable with plain data, zero mocks, zero databases, zero frameworks.**
 
 > **Design methodology**: This project follows the [Anti-OOP Design v2 Skill](https://github.com/cypress927/anti-oop-design-v2.SKILL) — a systematic approach to separating pure computation from side effects. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full principles applied here.
+>
+> **Why this approach matters for AI-assisted development**: When working with AI coding agents, traditional OOP/DDD makes it easy for the agent to scatter business rules across Entity methods, Service classes, and inline validations — each change touching multiple files, making the system progressively harder to reason about and maintain. The pure-function architecture constrains both human and AI to a single pattern: *gather facts → decide → execute*. Every business rule lives in one place, as one static function with explicit inputs and outputs. This prevents over-engineering, keeps decisions auditable, and makes the codebase equally maintainable whether written by humans, agents, or both together.
 
 ## Why This Architecture
 
@@ -291,6 +293,8 @@ src/main/resources/
 **一个用纯函数架构从头设计的银行系统 —— 所有复杂业务规则用纯数据即可完整测试，零 Mock、零数据库、零框架依赖。**
 
 > **设计方法论**：本项目遵循 [Anti-OOP Design v2 Skill](https://github.com/cypress927/anti-oop-design-v2.SKILL) —— 一套系统性地将纯计算与副作用分离的设计方法。完整原则见 [ARCHITECTURE.md](ARCHITECTURE.md)。
+>
+> **为什么这对 AI 辅助开发很重要**：使用传统 OOP/DDD 时，AI 编程 agent 很容易将业务规则散落到 Entity 方法、Service 类、行内校验等各处——每次改动触及多个文件，系统越来越难以理解和维护。纯函数架构将人和 AI 约束在同一模式：*收集事实 → 判定 → 执行*。每条业务规则只在一个地方、作为一个静态函数存在，输入输出一目了然。这避免了过度设计，让决策可审计，无论是人写、agent 写、还是人机协作，代码库都同样可维护。
 
 ## 为什么这样设计
 
