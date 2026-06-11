@@ -220,6 +220,22 @@ const api = {
 function showScreen(name) {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     D.get('screen-' + name).classList.add('active');
+    // Clear all operation-result divs when switching screens
+    clearAllResults();
+}
+
+/** Clear all operation result messages and login inputs so they don't persist across sessions. */
+function clearAllResults() {
+    var ids = [
+        'login-error',
+        'cl-create-account-result', 'cl-deposit-result', 'cl-transfer-result', 'cl-add-manager-result',
+        'bk-create-client-result', 'bk-delete-client-result', 'bk-find-result', 'bk-interest-result'
+    ];
+    ids.forEach(function(id) { D.show(id, ''); });
+    // Clear login form inputs on screen switch
+    ['login-client-user', 'login-banker-user', 'login-banker-pass'].forEach(function(id) {
+        var el = D.get(id); if (el) el.value = '';
+    });
 }
 
 /* =====================================================================
