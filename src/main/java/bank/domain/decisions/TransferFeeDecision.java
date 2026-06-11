@@ -6,14 +6,10 @@ import bank.domain.facts.Amount;
 /**
  * Pure function: computes all fees for a transfer.
  * Produces a complete fee breakdown — orchestration never re-derives.
+ * All fee parameters come from bank rules; nothing is hardcoded.
  * No I/O, no framework, no side effects.
  */
 public final class TransferFeeDecision {
-
-    /** Savings accounts get 6 free transfers per month before penalties. */
-    private static final int SAVINGS_FREE_TRANSFERS = 6;
-    /** Penalty per excess transfer for savings accounts (€). */
-    private static final Amount SAVINGS_EXCESS_PENALTY = Amount.ofEuros(2.00);
 
     /**
      * Fixed-size fee rule parameters — extracted from the bank rules store.
@@ -23,8 +19,12 @@ public final class TransferFeeDecision {
         double internalFeeEuros,
         double externalFlatFeeEuros,
         double externalPercentFee,
+        double externalMinFeeEuros,
+        double externalMaxFeeEuros,
         double taxThresholdEuros,
-        double taxRatePercent
+        double taxRatePercent,
+        int savingsFreeTransfers,
+        double savingsExcessPenaltyEuros
     ) {}
 
     /** Fixed-size business facts for fee computation. */
@@ -58,9 +58,9 @@ public final class TransferFeeDecision {
             Amount flat = Amount.ofEuros(facts.rules.externalFlatFeeEuros);
             Amount percent = facts.amount.times(facts.rules.externalPercentFee / 100.0);
             Amount raw = flat.plus(percent);
-            // Clamp: minimum 1.00€, maximum 50.00€
-            Amount minFee = Amount.ofEuros(1.00);
-            Amount maxFee = Amount.ofEuros(50.00);
+            // Clamp to configured min/max
+            Amount minFee = Amount.ofEuros(facts.rules.externalMinFeeEuros);
+            Amount maxFee = Amount.ofEuros(facts.rules.externalMaxFeeEuros);
             if (raw.compareTo(minFee) < 0) raw = minFee;
             if (raw.compareTo(maxFee) > 0) raw = maxFee;
             baseFee = raw;
@@ -69,8 +69,8 @@ public final class TransferFeeDecision {
         // Excess transfer penalty (savings accounts only)
         Amount excessPenalty = Amount.ZERO;
         if (facts.sourceAccountType == AccountType.SAVINGS
-                && facts.monthlyTransferCount >= SAVINGS_FREE_TRANSFERS) {
-            excessPenalty = SAVINGS_EXCESS_PENALTY;
+                && facts.monthlyTransferCount >= facts.rules.savingsFreeTransfers) {
+            excessPenalty = Amount.ofEuros(facts.rules.savingsExcessPenaltyEuros);
         }
 
         // Financial transaction tax: only on external transfers exceeding threshold

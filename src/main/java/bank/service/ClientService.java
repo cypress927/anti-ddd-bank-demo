@@ -15,6 +15,8 @@ import bank.repository.AccountStore;
 import bank.repository.BankRuleStore;
 import bank.repository.ClientStore;
 import bank.repository.TransferLogStore;
+
+import static bank.repository.BankRuleStore.requireRule;
 import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashMap;
@@ -106,8 +108,12 @@ public class ClientService {
             requireRule(rules, "transfer.fee.internal"),
             requireRule(rules, "transfer.fee.external.flat"),
             requireRule(rules, "transfer.fee.external.percent"),
+            requireRule(rules, "transfer.fee.external.min"),
+            requireRule(rules, "transfer.fee.external.max"),
             requireRule(rules, "transfer.tax.threshold"),
-            requireRule(rules, "transfer.tax.rate")
+            requireRule(rules, "transfer.tax.rate"),
+            (int) requireRule(rules, "transfer.savings.free.count"),
+            requireRule(rules, "transfer.savings.excess.penalty")
         );
         var feeFacts = new TransferFeeDecision.Facts(
             amount, isInternal, sourceAccount.accountType(), monthlyCount, feeRules);
@@ -222,13 +228,4 @@ public class ClientService {
         return transferLogStore.findByAccounts(accountNos, 50);
     }
 
-    /** Extracts a rule value from the map — throws if key is absent (data integrity error). */
-    private static double requireRule(Map<String, Double> rules, String key) {
-        var value = rules.get(key);
-        if (value == null) {
-            throw new IllegalStateException(
-                "Bank rule '%s' is not seeded. Check BankRuleStore.".formatted(key));
-        }
-        return value;
-    }
 }

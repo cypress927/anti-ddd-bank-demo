@@ -13,6 +13,8 @@ import bank.repository.BankRuleStore;
 import bank.repository.ClientStore;
 import bank.repository.InterestLogStore;
 import bank.repository.TransferLogStore;
+
+import static bank.repository.BankRuleStore.requireRule;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -173,13 +175,4 @@ public class BankService {
         return transferLogStore.recentTransfers(limit);
     }
 
-    /** Extracts a rule value from the map — throws if key is absent (data integrity error). */
-    private static double requireRule(Map<String, Double> rules, String key) {
-        var value = rules.get(key);
-        if (value == null) {
-            throw new IllegalStateException(
-                "Bank rule '%s' is not seeded. Check BankRuleStore.".formatted(key));
-        }
-        return value;
-    }
 }

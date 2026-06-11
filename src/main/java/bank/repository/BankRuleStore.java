@@ -24,14 +24,18 @@ public class BankRuleStore {
     /** Seed default rules if the table is empty. Called by DataSeeder after context init. */
     public void seedDefaults() {
         if (repo.count() > 0) return;
-        repo.save(new BankRuleEntity("interest.rate",                 2.0,  "Annual interest rate (%) for savings accounts"));
-        repo.save(new BankRuleEntity("interest.tax.rate",            25.0,  "Tax rate on interest income (%)"));
-        repo.save(new BankRuleEntity("interest.tax.exemption",      100.0,  "Yearly tax exemption on interest (EUR)"));
-        repo.save(new BankRuleEntity("transfer.fee.internal",         0.50, "Flat fee for internal transfers (EUR)"));
-        repo.save(new BankRuleEntity("transfer.fee.external.flat",    1.00, "Flat fee for external transfers (EUR)"));
-        repo.save(new BankRuleEntity("transfer.fee.external.percent", 0.05, "Percentage fee for external transfers (%)"));
-        repo.save(new BankRuleEntity("transfer.tax.threshold",    10000.0,  "Transaction tax trigger threshold (EUR)"));
-        repo.save(new BankRuleEntity("transfer.tax.rate",             0.1,  "Transaction tax rate on excess above threshold (%)"));
+        repo.save(new BankRuleEntity("interest.rate",                   2.0,  "Annual interest rate (%) for savings accounts"));
+        repo.save(new BankRuleEntity("interest.tax.rate",              25.0,  "Tax rate on interest income (%)"));
+        repo.save(new BankRuleEntity("interest.tax.exemption",        100.0,  "Yearly tax exemption on interest (EUR)"));
+        repo.save(new BankRuleEntity("transfer.fee.internal",           0.50, "Flat fee for internal transfers (EUR)"));
+        repo.save(new BankRuleEntity("transfer.fee.external.flat",      1.00, "Flat fee for external transfers (EUR)"));
+        repo.save(new BankRuleEntity("transfer.fee.external.percent",   0.05, "Percentage fee for external transfers (%)"));
+        repo.save(new BankRuleEntity("transfer.fee.external.min",       1.00, "Minimum external transfer fee (EUR)"));
+        repo.save(new BankRuleEntity("transfer.fee.external.max",      50.00, "Maximum external transfer fee (EUR)"));
+        repo.save(new BankRuleEntity("transfer.tax.threshold",      10000.0,  "Transaction tax trigger threshold (EUR)"));
+        repo.save(new BankRuleEntity("transfer.tax.rate",               0.1,  "Transaction tax rate on excess above threshold (%)"));
+        repo.save(new BankRuleEntity("transfer.savings.free.count",      6,   "Free transfers per month for savings accounts"));
+        repo.save(new BankRuleEntity("transfer.savings.excess.penalty", 2.00, "Penalty per excess transfer for savings (EUR)"));
     }
 
     /** Returns all rules as a Map<String,Double> for pure function consumption. */
@@ -41,6 +45,16 @@ public class BankRuleStore {
             map.put(e.getRuleKey(), e.getRuleValue());
         }
         return Collections.unmodifiableMap(map);
+    }
+
+    /** Extracts a rule value from the map — throws if key is absent (data integrity error). */
+    public static double requireRule(Map<String, Double> rules, String key) {
+        var value = rules.get(key);
+        if (value == null) {
+            throw new IllegalStateException(
+                "Bank rule '%s' is not seeded. Check BankRuleStore.".formatted(key));
+        }
+        return value;
     }
 
     /** Single rule lookup. */

@@ -10,15 +10,19 @@ import java.util.Map;
 public final class BankRuleConfigDecision {
 
     /** Valid ranges for each configurable rule — business constants. */
-    private static final Map<String, double[]> RANGES = Map.of(
-        "interest.rate",                new double[]{0, 20},
-        "interest.tax.rate",            new double[]{0, 50},
-        "interest.tax.exemption",       new double[]{0, 10_000},
-        "transfer.fee.internal",        new double[]{0, 20},
-        "transfer.fee.external.flat",   new double[]{0, 20},
-        "transfer.fee.external.percent",new double[]{0, 5},
-        "transfer.tax.threshold",       new double[]{0, 100_000},
-        "transfer.tax.rate",            new double[]{0, 1}
+    private static final Map<String, double[]> RANGES = Map.ofEntries(
+        Map.entry("interest.rate",                  new double[]{0, 20}),
+        Map.entry("interest.tax.rate",              new double[]{0, 50}),
+        Map.entry("interest.tax.exemption",         new double[]{0, 10_000}),
+        Map.entry("transfer.fee.internal",          new double[]{0, 20}),
+        Map.entry("transfer.fee.external.flat",     new double[]{0, 20}),
+        Map.entry("transfer.fee.external.percent",  new double[]{0, 5}),
+        Map.entry("transfer.fee.external.min",      new double[]{0, 100}),
+        Map.entry("transfer.fee.external.max",      new double[]{0, 10_000}),
+        Map.entry("transfer.tax.threshold",         new double[]{0, 100_000}),
+        Map.entry("transfer.tax.rate",              new double[]{0, 1}),
+        Map.entry("transfer.savings.free.count",    new double[]{0, 100}),
+        Map.entry("transfer.savings.excess.penalty",new double[]{0, 100})
     );
 
     /** Fixed-size business facts. */
