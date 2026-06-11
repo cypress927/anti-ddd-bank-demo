@@ -6,7 +6,8 @@ package bank.domain.facts;
  */
 public record AccessFact(Long id, long clientId, String clientUsername,
                          boolean isOwner, AccountNo accountNo,
-                         String accountName, Amount accountBalance) {
+                         String accountName, Amount accountBalance,
+                         AccountType accountType) {
 
     public AccessFact {
         if (clientUsername == null || clientUsername.isBlank())
@@ -15,17 +16,21 @@ public record AccessFact(Long id, long clientId, String clientUsername,
             throw new IllegalArgumentException("accountNo is required");
         if (accountBalance == null)
             accountBalance = Amount.ZERO;
+        if (accountType == null)
+            accountType = AccountType.CHECKING;
     }
 
     public static AccessFact unsaved(long clientId, String clientUsername,
                                       boolean isOwner, AccountNo accountNo,
-                                      String accountName, Amount accountBalance) {
+                                      String accountName, Amount accountBalance,
+                                      AccountType accountType) {
         return new AccessFact(null, clientId, clientUsername,
-            isOwner, accountNo, accountName, accountBalance);
+            isOwner, accountNo, accountName, accountBalance, accountType);
     }
 
     public AccessFact withId(Long id) {
         return new AccessFact(id, this.clientId, this.clientUsername,
-            this.isOwner, this.accountNo, this.accountName, this.accountBalance);
+            this.isOwner, this.accountNo, this.accountName, this.accountBalance,
+            this.accountType);
     }
 }

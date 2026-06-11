@@ -1,6 +1,7 @@
 package bank.transport;
 
 import bank.domain.facts.AccountNo;
+import bank.domain.facts.AccountType;
 import bank.domain.facts.Amount;
 import bank.service.BusinessException;
 import bank.service.ClientService;
@@ -10,6 +11,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.security.Principal;
+import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 
 /**
@@ -46,7 +49,12 @@ public class ClientController {
     public ResponseEntity<Commands.AccessResponse> createAccount(
             @RequestBody Commands.CreateAccountRequest req,
             Principal principal, HttpServletRequest request) {
-        var access = clientService.createAccount(username(principal, request), req.name());
+        AccountType accountType = AccountType.CHECKING;
+        if (req.accountType() != null && req.accountType().equalsIgnoreCase("SAVINGS")) {
+            accountType = AccountType.SAVINGS;
+        }
+        var access = clientService.createAccount(username(principal, request),
+            req.name(), accountType);
         return ResponseEntity.status(HttpStatus.CREATED)
             .body(Commands.AccessResponse.from(access));
     }
@@ -65,14 +73,15 @@ public class ClientController {
     // ---- POST /client/transfer ----
 
     @PostMapping("/transfer")
-    public ResponseEntity<Commands.AccountResponse> transfer(
+    public ResponseEntity<Map<String, Object>> transfer(
             @RequestBody Commands.TransferRequest req,
             Principal principal, HttpServletRequest request) {
-        clientService.transfer(username(principal, request),
+        var result = clientService.transfer(username(principal, request),
             new AccountNo(req.sourceAccountNo()),
             new AccountNo(req.destinationAccountNo()),
-            Amount.ofEuros(req.amount()));
-        return ResponseEntity.noContent().build();
+            Amount.ofEuros(req.amount()),
+            req.isInternal());
+        return ResponseEntity.ok(result);
     }
 
     // ---- POST /client/manager ----
@@ -94,6 +103,22 @@ public class ClientController {
             Principal principal, HttpServletRequest request) {
         var report = clientService.accountsReport(username(principal, request));
         return ResponseEntity.ok(report);
+    }
+
+    // ---- GET /client/transfers ----
+
+    @GetMapping("/transfers")
+    public ResponseEntity<List<Map<String, Object>>> myTransfers(
+            Principal principal, HttpServletRequest request) {
+        return ResponseEntity.ok(clientService.myTransfers(username(principal, request)));
+    }
+
+    // ---- GET /client/accounts (structured, for UI) ----
+
+    @GetMapping("/accounts")
+    public ResponseEntity<List<Map<String, Object>>> myAccounts(
+            Principal principal, HttpServletRequest request) {
+        return ResponseEntity.ok(clientService.myAccounts(username(principal, request)));
     }
 
     // ---- exception handlers ----

@@ -3,17 +3,23 @@ package bank.service;
 import bank.domain.decisions.AddAccountManagerDecision;
 import bank.domain.decisions.DepositDecision;
 import bank.domain.decisions.TransferDecision;
+import bank.domain.decisions.TransferFeeDecision;
 import bank.domain.facts.AccountFact;
 import bank.domain.facts.AccountNo;
+import bank.domain.facts.AccountType;
 import bank.domain.facts.AccessFact;
 import bank.domain.facts.Amount;
 import bank.domain.facts.ClientFact;
 import bank.repository.AccessStore;
 import bank.repository.AccountStore;
+import bank.repository.BankRuleStore;
 import bank.repository.ClientStore;
+import bank.repository.TransferLogStore;
 import org.springframework.stereotype.Service;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 
 /**
@@ -31,50 +37,58 @@ public class ClientService {
     private final ClientStore clientStore;
     private final AccountStore accountStore;
     private final AccessStore accessStore;
+    private final BankRuleStore bankRuleStore;
+    private final TransferLogStore transferLogStore;
 
     public ClientService(ClientStore clientStore, AccountStore accountStore,
-                         AccessStore accessStore) {
+                         AccessStore accessStore, BankRuleStore bankRuleStore,
+                         TransferLogStore transferLogStore) {
         this.clientStore = clientStore;
         this.accountStore = accountStore;
         this.accessStore = accessStore;
+        this.bankRuleStore = bankRuleStore;
+        this.transferLogStore = transferLogStore;
     }
 
-    // ---- createAccount (mechanical — no pure business rule to apply) ----
+    // ---- createAccount ----
 
-    public AccessFact createAccount(String username, String accountName) {
+    public AccessFact createAccount(String username, String accountName, AccountType accountType) {
         var client = clientStore.findByUsername(username)
             .orElseThrow(() -> new NoSuchElementException("Client not found: " + username));
-        // Mechanical: create account, create owner access
-        var account = accountStore.save(accountName);
+        var account = accountStore.save(accountName, accountType);
         return accessStore.save(client.id(), client.username(), true,
-            account.accountNo(), account.name(), account.balance());
+            account.accountNo(), account.name(), account.balance(), account.accountType());
     }
 
-    // ---- deposit ----
+    // ---- deposit (no tax on deposits — pure value transfer) ----
 
     public void deposit(String username, AccountNo destination, Amount amount) {
         var client = clientStore.findByUsername(username)
             .orElseThrow(() -> new NoSuchElementException("Client not found: " + username));
-        // 1. Prepare facts
         var destOpt = accountStore.findByNo(destination);
         var currentBalance = destOpt.map(AccountFact::balance).orElse(Amount.ZERO);
         var facts = new DepositDecision.Facts(
             amount, currentBalance, destOpt.isPresent());
-        // 2. Pure business computation
         var result = DepositDecision.decide(facts);
-        // 3. Execute effects — use already-loaded fact to avoid extra SQL SELECT
         if (!result.allowed()) {
             throw new BusinessException(result.reason());
         }
         accountStore.updateBalance(destOpt.get(), result.newBalance());
     }
 
-    // ---- transfer ----
+    // ---- transfer (with fees) ----
 
-    public void transfer(String username, AccountNo source, AccountNo destination, Amount amount) {
+    /**
+     * Complete transfer with fee breakdown returned for display.
+     * Flow: load facts → compute fees → decide transfer → execute effects.
+     */
+    public Map<String, Object> transfer(String username, AccountNo source,
+                                         AccountNo destination, Amount amount,
+                                         boolean isInternal) {
         var client = clientStore.findByUsername(username)
             .orElseThrow(() -> new NoSuchElementException("Client not found: " + username));
-        // 1. Prepare facts — load everything the pure function needs
+
+        // 1. Prepare facts
         var srcOpt = accountStore.findByNo(source);
         if (srcOpt.isEmpty()) {
             throw new BusinessException("Source account does not exist: " + source);
@@ -83,17 +97,46 @@ public class ClientService {
         var hasAccessRight = accessStore.findByClientAndAccount(client.id(), source).isPresent();
         var destOpt = accountStore.findByNo(destination);
         var destBalance = destOpt.map(AccountFact::balance).orElse(Amount.ZERO);
-        var facts = new TransferDecision.Facts(
-            amount, hasAccessRight, sourceAccount.balance(),
-            destOpt.isPresent(), destBalance);
-        // 2. Pure business computation — computes BOTH new balances
-        var result = TransferDecision.decide(facts);
-        // 3. Execute effects — both balances come from the pure function
-        if (!result.allowed()) {
-            throw new BusinessException(result.reason());
+
+        // 2. Compute fees (pure function)
+        int monthlyCount = transferLogStore.countThisMonth(source);
+        var rules = bankRuleStore.getAll();
+        // Rules are always seeded — missing key is a data integrity error
+        var feeRules = new TransferFeeDecision.FeeRules(
+            requireRule(rules, "transfer.fee.internal"),
+            requireRule(rules, "transfer.fee.external.flat"),
+            requireRule(rules, "transfer.fee.external.percent"),
+            requireRule(rules, "transfer.tax.threshold"),
+            requireRule(rules, "transfer.tax.rate")
+        );
+        var feeFacts = new TransferFeeDecision.Facts(
+            amount, isInternal, sourceAccount.accountType(), monthlyCount, feeRules);
+        var feeResult = TransferFeeDecision.decide(feeFacts);
+
+        // 3. Decide transfer (pure function — uses total fee)
+        var transferFacts = new TransferDecision.Facts(
+            amount, feeResult.totalFee(), hasAccessRight, sourceAccount.balance(),
+            destOpt.isPresent(), destBalance, sourceAccount.accountType());
+        var transferResult = TransferDecision.decide(transferFacts);
+        if (!transferResult.allowed()) {
+            throw new BusinessException(transferResult.reason());
         }
-        accountStore.updateBalance(sourceAccount, result.newSourceBalance());
-        accountStore.updateBalance(destOpt.get(), result.newDestinationBalance());
+
+        // 4. Execute effects
+        accountStore.updateBalance(sourceAccount, transferResult.newSourceBalance());
+        accountStore.updateBalance(destOpt.get(), transferResult.newDestinationBalance());
+        transferLogStore.record(source, destination, amount, feeResult, isInternal);
+
+        // Return complete breakdown for UI display
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("sourceNewBalance", transferResult.newSourceBalance().toDouble());
+        response.put("destNewBalance", transferResult.newDestinationBalance().toDouble());
+        response.put("baseFee", feeResult.baseFee().toDouble());
+        response.put("excessPenalty", feeResult.excessPenalty().toDouble());
+        response.put("transactionTax", feeResult.transactionTax().toDouble());
+        response.put("totalFee", feeResult.totalFee().toDouble());
+        response.put("isInternal", isInternal);
+        return response;
     }
 
     // ---- addAccountManager ----
@@ -103,21 +146,18 @@ public class ClientService {
             .orElseThrow(() -> new NoSuchElementException("Client not found: " + username));
         var manager = clientStore.findByUsername(managerUsername)
             .orElseThrow(() -> new NoSuchElementException("Manager not found: " + managerUsername));
-        // 1. Prepare facts
         var requesterIsOwner = accessStore.isOwner(owner.id(), accountNo);
         var managerAlreadyHasAccess = accessStore
             .findByClientAndAccount(manager.id(), accountNo).isPresent();
         var facts = new AddAccountManagerDecision.Facts(
             requesterIsOwner, managerAlreadyHasAccess);
-        // 2. Pure business computation
         var result = AddAccountManagerDecision.decide(facts);
-        // 3. Execute effects
         if (!result.allowed()) {
             throw new BusinessException(result.reason());
         }
         var account = accountStore.findByNo(accountNo).orElseThrow();
         return accessStore.save(manager.id(), manager.username(), false,
-            accountNo, account.name(), account.balance());
+            accountNo, account.name(), account.balance(), account.accountType());
     }
 
     // ---- findMyAccount ----
@@ -146,9 +186,49 @@ public class ClientService {
         sb.append("Accounts of client: ").append(username).append("\n");
         for (var a : accesses) {
             var accessRight = a.isOwner() ? "isOwner" : "manages";
-            sb.append("%s\t%s\t%5.2f\t%s\n".formatted(
-                a.accountNo(), accessRight, a.accountBalance().toDouble(), a.accountName()));
+            sb.append("%s\t%s\t%5.2f\t%s\t%s\n".formatted(
+                a.accountNo(), accessRight, a.accountBalance().toDouble(),
+                a.accountName(), a.accountType()));
         }
         return sb.toString();
+    }
+
+    // ---- listMyAccounts (structured, for UI) ----
+
+    public List<Map<String, Object>> myAccounts(String username) {
+        var client = clientStore.findByUsername(username)
+            .orElseThrow(() -> new NoSuchElementException("Client not found: " + username));
+        return accessStore.findByClient(client.id()).stream()
+            .map(a -> {
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("accountNo", a.accountNo().number());
+                m.put("accountName", a.accountName());
+                m.put("balance", a.accountBalance().toDouble());
+                m.put("accountType", a.accountType().name());
+                m.put("isOwner", a.isOwner());
+                return m;
+            })
+            .toList();
+    }
+
+    // ---- myTransfers ----
+
+    public List<Map<String, Object>> myTransfers(String username) {
+        var client = clientStore.findByUsername(username)
+            .orElseThrow(() -> new NoSuchElementException("Client not found: " + username));
+        var accountNos = accessStore.findByClient(client.id()).stream()
+            .map(a -> a.accountNo())
+            .toList();
+        return transferLogStore.findByAccounts(accountNos, 50);
+    }
+
+    /** Extracts a rule value from the map — throws if key is absent (data integrity error). */
+    private static double requireRule(Map<String, Double> rules, String key) {
+        var value = rules.get(key);
+        if (value == null) {
+            throw new IllegalStateException(
+                "Bank rule '%s' is not seeded. Check BankRuleStore.".formatted(key));
+        }
+        return value;
     }
 }

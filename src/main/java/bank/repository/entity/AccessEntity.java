@@ -48,7 +48,8 @@ public class AccessEntity {
             this.isOwner,
             new AccountNo(this.account.getAccountNo()),
             this.account.getName(),
-            new Amount(this.account.getBalanceCents())
+            new Amount(this.account.getBalanceCents()),
+            this.account.getAccountType()
         );
     }
 

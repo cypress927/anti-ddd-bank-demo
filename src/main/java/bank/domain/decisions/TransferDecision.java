@@ -1,30 +1,35 @@
 package bank.domain.decisions;
 
+import bank.domain.facts.AccountType;
 import bank.domain.facts.Amount;
 
 /**
  * Pure function: decides whether a transfer is allowed and computes BOTH new balances.
- * Contains the minimum-balance business rule.
+ * Contains the minimum-balance business rule and account-type overdraft policy.
  * No I/O, no framework, no side effects.
  */
 public final class TransferDecision {
 
-    /** The minimum balance every account must maintain (allows overdraft up to 1000€). */
-    public static final Amount MINIMUM_BALANCE = Amount.ofEuros(-1000);
+    /** The minimum balance a checking account must maintain (allows overdraft up to 1000€). */
+    public static final Amount CHECKING_MIN_BALANCE = Amount.ofEuros(-1000);
 
     /**
      * Fixed-size business facts. Every field is a scalar or flag — no entities, no collections.
      *
+     * @param totalFee sum of all fees (base fee + penalty + tax), computed upstream by
+     *        {@link TransferFeeDecision} — the pure function owns the deduction calculation
+     * @param sourceAccountType determines overdraft policy (checking: -1000€, savings: no overdraft)
      * @param destinationCurrentBalance the destination's current balance, needed
      *        so the pure function can compute the destination result itself
-     *        (instead of leaking that computation into orchestration).
      */
     public record Facts(
         Amount amount,
+        Amount totalFee,
         boolean hasAccessRight,
         Amount sourceCurrentBalance,
         boolean destinationExists,
-        Amount destinationCurrentBalance
+        Amount destinationCurrentBalance,
+        AccountType sourceAccountType
     ) {}
 
     /**
@@ -60,19 +65,29 @@ public final class TransferDecision {
             return Result.reject(
                 "You do not have access to the source account.");
         }
-        // 3. Source balance must stay above minimum after transfer
-        var newSourceBalance = facts.sourceCurrentBalance.minus(facts.amount);
-        if (newSourceBalance.compareTo(MINIMUM_BALANCE) < 0) {
-            return Result.reject(
-                "New balance %s EUR would fall below the minimum balance %s EUR."
-                    .formatted(newSourceBalance, MINIMUM_BALANCE));
+        // 3. Total deduction = amount + fee (source pays fees)
+        Amount totalDeduction = facts.amount.plus(facts.totalFee);
+        Amount newSourceBalance = facts.sourceCurrentBalance.minus(totalDeduction);
+        // 4. Minimum balance check — depends on account type
+        if (facts.sourceAccountType == AccountType.SAVINGS) {
+            if (newSourceBalance.compareTo(Amount.ZERO) < 0) {
+                return Result.reject(
+                    "New balance %s EUR would be negative. Savings accounts cannot overdraw."
+                        .formatted(newSourceBalance));
+            }
+        } else {
+            if (newSourceBalance.compareTo(CHECKING_MIN_BALANCE) < 0) {
+                return Result.reject(
+                    "New balance %s EUR would fall below the minimum balance %s EUR."
+                        .formatted(newSourceBalance, CHECKING_MIN_BALANCE));
+            }
         }
-        // 4. Destination must exist
+        // 5. Destination must exist
         if (!facts.destinationExists) {
             return Result.reject("Destination account does not exist.");
         }
-        // 5. Compute both new balances — business rule completed
-        var newDestinationBalance = facts.destinationCurrentBalance.plus(facts.amount);
+        // 6. Destination receives the transfer amount only (not fees)
+        Amount newDestinationBalance = facts.destinationCurrentBalance.plus(facts.amount);
         return Result.ok(newSourceBalance, newDestinationBalance);
     }
 }

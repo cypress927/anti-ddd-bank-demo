@@ -1,256 +1,440 @@
 /**
- * Anti-OOP Bank UI
+ * Anti-OOP Bank UI — role-separated login → dashboard.
  *
- * Architecture follows CLAUDE.md:
- *   - Pure functions: data transform, formatting, row builders (no DOM, no fetch)
- *   - Side-effect functions: api.* (HTTP), dom.* (DOM mutation)
- *   - Orchestration: event handlers — 1. gather inputs → 2. call api → 3. render result
+ * Architecture:
+ *   Pure functions    — F.*     (data transform, zero side effects)
+ *   Side-effect       — api.*   (HTTP), dom.* (DOM), S.* (session)
+ *   Orchestration     — event handlers (gather → call → render)
  */
 
-/* ========================================================================
- *  PURE FUNCTIONS — transform data, zero side effects
- * ======================================================================== */
+/* =====================================================================
+ *  PURE FUNCTIONS — F
+ * ===================================================================== */
 
-/** Format a balance string (e.g. "1500.00" or "-1000.00") → styled span */
-const formatBalance = (balance) => {
-    const n = parseFloat(balance);
-    const cls = n < 0 ? 'error' : n > 0 ? 'success' : '';
-    return `<span class="${cls}">${Number(n).toFixed(2)}</span>`;
+const F = {
+    m: (n) => Number(n).toFixed(2),
+    bal: (n) => `<span class="${n < 0 ? 'error' : n > 0 ? 'success' : ''}">${F.m(n)}</span>`,
+    date: (iso) => { if (!iso) return ''; const [y, m, d] = iso.split('-'); return `${d}.${m}.${y}`; },
+    ok: (m) => `<span class="success">✓ ${m}</span>`,
+    err: (m) => `<span class="error">✗ ${m}</span>`,
+
+    badge: (t, cls) => `<span class="badge ${cls}">${t}</span>`,
+    typeBadge: (t) => F.badge(t, t === 'SAVINGS' ? 'badge-savings' : 'badge-checking'),
+    roleBadge: (o) => F.badge(o ? 'Owner' : 'Manager', o ? 'badge-owner' : 'badge-manager'),
+
+    clientsTable: (list) => {
+        if (!list || !list.length) return '<p>No clients.</p>';
+        return `<table><tr><th>ID</th><th>Username</th><th>Birth</th></tr>
+            ${list.map(c => `<tr><td>${c.id}</td><td>${c.username}</td><td>${F.date(c.birthDate)}</td></tr>`).join('')}
+        </table>`;
+    },
+
+    accountsTable: (list) => {
+        if (!list || !list.length) return '<p>No accounts yet. Open one above.</p>';
+        return `<table><tr><th>#</th><th>Name</th><th>Type</th><th>Balance</th><th>Role</th></tr>
+            ${list.map(a => `<tr>
+                <td>${a.accountNo}</td><td>${a.accountName}</td>
+                <td>${F.typeBadge(a.accountType)}</td><td>${F.bal(a.balance)}</td>
+                <td>${F.roleBadge(a.isOwner)}</td>
+            </tr>`).join('')}</table>`;
+    },
+
+    /** Client-facing rates — simplified, human-readable. */
+    ratesTable: (rules) => {
+        if (!rules || !rules.length) return '';
+        const r = (k) => rules.find(x => x.key === k)?.value ?? '—';
+        const pct = (k) => F.m(r(k)) + '%';
+        const eur = (k) => F.m(r(k)) + ' €';
+        return `<table>
+            <tr><td>Savings interest rate</td><td>${pct('interest.rate')} per year</td></tr>
+            <tr><td>Interest tax rate</td><td>${pct('interest.tax.rate')}</td></tr>
+            <tr><td>Interest tax exemption</td><td>${eur('interest.tax.exemption')} per year</td></tr>
+            <tr><td>Internal transfer fee</td><td>${eur('transfer.fee.internal')}</td></tr>
+            <tr><td>External transfer fee</td><td>${eur('transfer.fee.external.flat')} + ${pct('transfer.fee.external.percent')} of amount</td></tr>
+            <tr><td>Large transfer tax threshold</td><td>${eur('transfer.tax.threshold')}</td></tr>
+            <tr><td>Large transfer tax rate</td><td>${pct('transfer.tax.rate')} on excess</td></tr>
+        </table>`;
+    },
+
+    /** Banker-facing rules — editable table with save buttons. */
+    rulesTable: (rules) => {
+        if (!rules || !rules.length) return '<p>No rules.</p>';
+        return `<table><tr><th>Key</th><th>Value</th><th>Description</th><th></th></tr>
+            ${rules.map(r => `<tr>
+                <td><code>${r.key}</code></td>
+                <td>${Number(r.value).toFixed(4)}</td>
+                <td style="font-size:0.78rem;color:var(--muted)">${r.description||''}</td>
+                <td><span class="rule-edit-row">
+                    <input type="number" id="rv-${r.key.replace(/\./g,'-')}" value="${r.value}" step="0.01">
+                    <button class="small rule-save-btn" data-key="${r.key}">Save</button>
+                </span></td>
+            </tr>`).join('')}</table>`;
+    },
+
+    transfersTable: (list) => {
+        if (!list || !list.length) return '<p>No transfers yet.</p>';
+        return `<table><tr><th>ID</th><th>From</th><th>To</th><th>Amount</th><th>Fee</th><th>Penalty</th><th>Tax</th><th>Type</th><th>Date</th></tr>
+            ${list.map(t => `<tr>
+                <td>${t.id}</td><td>#${t.source}</td><td>#${t.destination}</td>
+                <td>${F.m(t.amount)}</td><td>${F.m(t.fee)}</td>
+                <td>${t.penalty>0?`<span class="warn">${F.m(t.penalty)}</span>`:'—'}</td>
+                <td>${t.tax>0?`<span class="warn">${F.m(t.tax)}</span>`:'—'}</td>
+                <td>${t.isInternal?'Internal':'<span class="warn">External</span>'}</td>
+                <td>${t.date}</td>
+            </tr>`).join('')}</table>`;
+    },
+
+    interestTable: (list) => {
+        if (!list || !list.length) return '<p>No savings accounts.</p>';
+        let tg=0, tt=0, tn=0;
+        const rows = list.map(r => { tg+=r.grossInterest; tt+=r.taxAmount; tn+=r.netInterest;
+            return `<tr><td>#${r.accountNo}</td><td>${r.accountName}</td><td>${F.bal(r.balance)}</td>
+                <td>${F.m(r.grossInterest)}</td><td>${F.m(r.taxableInterest)}</td>
+                <td>${F.m(r.taxAmount)}</td><td>${F.bal(r.netInterest)}</td></tr>`;
+        }).join('');
+        return `<table><tr><th>Acc</th><th>Name</th><th>Balance</th><th>Gross</th><th>Taxable</th><th>Tax</th><th>Net</th></tr>
+            ${rows}<tr style="font-weight:600;border-top:2px solid var(--border);background:#f9fafb">
+                <td colspan="3">Totals</td><td>${F.m(tg)}</td><td></td><td>${F.m(tt)}</td><td>${F.m(tn)}</td></tr></table>`;
+    },
+
+    feeBreakdown: (r) => {
+        const p = [];
+        if (r.baseFee > 0) p.push(`Base: ${F.m(r.baseFee)}€`);
+        if (r.excessPenalty > 0) p.push(`Penalty: ${F.m(r.excessPenalty)}€`);
+        if (r.transactionTax > 0) p.push(`Tax: ${F.m(r.transactionTax)}€`);
+        return p.length
+            ? `<div class="fee-breakdown">${p.join(' | ')} | <strong>Total fee: ${F.m(r.totalFee)}€</strong></div>`
+            : `<div class="fee-breakdown">No fees</div>`;
+    }
 };
 
-/** Format ISO date (yyyy-mm-dd) → readable */
-const formatDate = (iso) => {
-    if (!iso) return '';
-    const [y, m, d] = iso.split('-');
-    return `${d}.${m}.${y}`;
+/* =====================================================================
+ *  SIDE-EFFECT: DOM — D
+ * ===================================================================== */
+
+const D = {
+    get: (id) => document.getElementById(id),
+    val: (id) => D.get(id)?.value.trim() ?? '',
+    checked: (id) => D.get(id)?.checked ?? false,
+    show: (id, h) => { const e = D.get(id); if (e) e.innerHTML = h; },
+    load: (id) => D.show(id, '<span class="loading">Loading...</span>'),
+    ok: (id, m) => D.show(id, F.ok(m)),
+    err: (id, e) => D.show(id, F.err(e.message || e)),
 };
 
-/** Pure: build a client table row from a client fact */
-const clientToRow = (c) =>
-    `<tr><td>${c.id}</td><td>${c.username}</td><td>${formatDate(c.birthDate)}</td></tr>`;
+/* =====================================================================
+ *  SIDE-EFFECT: SESSION — S
+ * ===================================================================== */
 
-/** Pure: build an access result row from an access fact */
-const accessToRow = (a) =>
-    `<tr>
-        <td>${a.accountNo}</td>
-        <td>${a.accountName}</td>
-        <td>${a.isOwner ? 'Owner' : 'Manager'}</td>
-        <td>${formatBalance(a.accountBalance)}</td>
-    </tr>`;
+const S = {
+    _key: null,
+    _user: null,
+    _role: null,
 
-/** Pure: build a single-line result message */
-const successMsg = (msg) => `<span class="success">✓ ${msg}</span>`;
-const errorMsg = (msg) => `<span class="error">✗ ${msg}</span>`;
-
-/** Pure: build a client table from an array of client facts */
-const clientsToTable = (clients) => {
-    if (!clients || clients.length === 0) return '<p>No clients found.</p>';
-    return `<table>
-        <tr><th>ID</th><th>Username</th><th>Birth Date</th></tr>
-        ${clients.map(clientToRow).join('')}
-    </table>`;
+    bankerKey: () => S._key,
+    setBanker: (key) => { S._key = key; S._role = 'banker'; },
+    setClient: (user) => { S._user = user; S._role = 'client'; },
+    user: () => S._user,
+    role: () => S._role,
+    clear: () => { S._key = null; S._user = null; S._role = null; }
 };
 
-/* ========================================================================
- *  SIDE-EFFECT FUNCTIONS — HTTP calls
- * ======================================================================== */
+/* =====================================================================
+ *  SIDE-EFFECT: API
+ * ===================================================================== */
 
 const BASE = '';
 
 const api = {
-
-    /** Call an endpoint, return parsed JSON or text. Throw on non-ok. */
     _fetch: async (url, opts = {}) => {
         const res = await fetch(url, opts);
         const text = await res.text();
         if (!res.ok) {
-            // Try to extract a clean error message
             const clean = text.replace(/^.*"message":"([^"]+)".*$/, '$1');
             throw new Error(clean || text || `HTTP ${res.status}`);
         }
         try { return JSON.parse(text); } catch (_) { return text; }
     },
 
-    /** Get X-Username header value from the identity input */
-    _username: () => document.getElementById('my-username').value.trim(),
+    // ---- Banker auth ----
+    bankerLogin: (u, p) => api._fetch(`${BASE}/bank/login`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: u, password: p }) }),
 
-    _headers: function () {
-        const u = this._username();
-        return u ? { 'X-Username': u, 'Content-Type': 'application/json' }
-                  : { 'Content-Type': 'application/json' };
+    _bkHeaders: () => {
+        const h = { 'Content-Type': 'application/json' };
+        if (S.bankerKey()) h['X-Banker-Key'] = S.bankerKey();
+        return h;
     },
 
-    // ---- Banker ----
+    // ---- Banker operations (authenticated) ----
+    createClient: (u, b) => api._fetch(`${BASE}/bank/client`, {
+        method: 'POST', headers: api._bkHeaders(),
+        body: JSON.stringify({ username: u, birthDate: b }) }),
+    deleteClient: (u) => api._fetch(`${BASE}/bank/client/${encodeURIComponent(u)}`, {
+        method: 'DELETE', headers: api._bkHeaders() }),
+    updateRule: (k, v) => api._fetch(`${BASE}/bank/rules`, {
+        method: 'PUT', headers: api._bkHeaders(),
+        body: JSON.stringify({ ruleKey: k, value: v }) }),
+    accrueInterest: (d) => api._fetch(`${BASE}/bank/accrue-interest`, {
+        method: 'POST', headers: api._bkHeaders(),
+        body: JSON.stringify({ days: d }) }),
 
-    createClient: (username, birthDate) =>
-        api._fetch(`${BASE}/bank/client`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, birthDate })
-        }),
-
-    deleteClient: (username) =>
-        api._fetch(`${BASE}/bank/client/${encodeURIComponent(username)}`, { method: 'DELETE' }),
-
-    findClients: (fromBirth, minBalance) => {
-        const params = new URLSearchParams();
-        if (fromBirth) params.set('fromBirth', fromBirth);
-        if (minBalance) params.set('minBalance', minBalance);
-        const qs = params.toString();
-        return api._fetch(`${BASE}/bank/client${qs ? '?' + qs : ''}`);
+    // ---- Public read endpoints ----
+    findClients: (birth, bal) => {
+        const p = new URLSearchParams();
+        if (birth) p.set('fromBirth', birth);
+        if (bal) p.set('minBalance', bal);
+        const q = p.toString();
+        return api._fetch(`${BASE}/bank/client${q ? '?' + q : ''}`);
     },
+    getRules: () => api._fetch(`${BASE}/bank/rules`),
+    allTransfers: (n) => api._fetch(`${BASE}/bank/transfers?limit=${n || 20}`),
 
-    // ---- Client ----
-
-    createAccount: (name) =>
-        api._fetch(`${BASE}/client/account`, {
-            method: 'POST',
-            headers: api._headers(),
-            body: JSON.stringify({ name })
-        }),
-
-    deposit: (accountNo, amount) =>
-        api._fetch(`${BASE}/client/deposit`, {
-            method: 'POST',
-            headers: api._headers(),
-            body: JSON.stringify({ accountNo: Number(accountNo), amount: Number(amount) })
-        }),
-
-    transfer: (src, dst, amount) =>
-        api._fetch(`${BASE}/client/transfer`, {
-            method: 'POST',
-            headers: api._headers(),
-            body: JSON.stringify({
-                sourceAccountNo: Number(src),
-                destinationAccountNo: Number(dst),
-                amount: Number(amount)
-            })
-        }),
-
-    addManager: (accountNo, managerUsername) =>
-        api._fetch(`${BASE}/client/manager`, {
-            method: 'POST',
-            headers: api._headers(),
-            body: JSON.stringify({ accountNo: Number(accountNo), username: managerUsername })
-        }),
-
-    accountsReport: () =>
-        api._fetch(`${BASE}/client/account`, { headers: api._headers() }),
+    // ---- Client (X-Username auth) ----
+    _clHeaders: () => {
+        const u = S.user();
+        return u ? { 'X-Username': u, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
+    },
+    myAccounts: () => api._fetch(`${BASE}/client/accounts`, { headers: api._clHeaders() }),
+    createAccount: (n, t) => api._fetch(`${BASE}/client/account`, {
+        method: 'POST', headers: api._clHeaders(),
+        body: JSON.stringify({ name: n, accountType: t }) }),
+    deposit: (acct, amt) => api._fetch(`${BASE}/client/deposit`, {
+        method: 'POST', headers: api._clHeaders(),
+        body: JSON.stringify({ accountNo: Number(acct), amount: Number(amt) }) }),
+    transfer: (src, dst, amt, internal) => api._fetch(`${BASE}/client/transfer`, {
+        method: 'POST', headers: api._clHeaders(),
+        body: JSON.stringify({ sourceAccountNo: Number(src), destinationAccountNo: Number(dst),
+            amount: Number(amt), isInternal: internal }) }),
+    addManager: (acct, mgr) => api._fetch(`${BASE}/client/manager`, {
+        method: 'POST', headers: api._clHeaders(),
+        body: JSON.stringify({ accountNo: Number(acct), username: mgr }) }),
+    myTransfers: () => api._fetch(`${BASE}/client/transfers`, { headers: api._clHeaders() }),
 };
 
-/* ========================================================================
- *  SIDE-EFFECT FUNCTIONS — DOM manipulation
- * ======================================================================== */
+/* =====================================================================
+ *  ORCHESTRATION: Screen switching
+ * ===================================================================== */
 
-const dom = {
-    get: (id) => document.getElementById(id),
-    val: (id) => dom.get(id).value.trim(),
-    clear: (id) => { dom.get(id).innerHTML = ''; },
-    show: (id, html) => { dom.get(id).innerHTML = html; },
-    showLoading: (id) => { dom.get(id).innerHTML = '<span class="loading">Loading...</span>'; },
-    showErr: (id, err) => { dom.get(id).innerHTML = errorMsg(err.message || err); },
-};
+function showScreen(name) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    D.get('screen-' + name).classList.add('active');
+}
 
-/* ========================================================================
- *  ORCHESTRATION — event handlers: gather → call → render
- * ======================================================================== */
+/* =====================================================================
+ *  ORCHESTRATION: Login screen
+ * ===================================================================== */
 
-// ---- Banker: create client ----
-dom.get('btn-create-client').onclick = async () => {
-    const username = dom.val('create-username');
-    const birthDate = dom.val('create-birthdate');
-    const rid = 'create-client-result';
-    if (!username || !birthDate) { dom.showErr(rid, new Error('Both fields required.')); return; }
-    dom.showLoading(rid);
+// Role toggle buttons
+document.querySelectorAll('.login-role').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.login-role').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.login-form').forEach(f => f.classList.remove('active'));
+        btn.classList.add('active');
+        D.get('login-form-' + btn.dataset.role).classList.add('active');
+        D.show('login-error', '');
+    });
+});
+
+// Client login
+D.get('btn-login-client').onclick = async () => {
+    const u = D.val('login-client-user');
+    if (!u) { D.err('login-error', 'Enter a username.'); return; }
+    D.load('login-error');
+    S.setClient(u);
     try {
-        const c = await api.createClient(username, birthDate);
-        dom.show(rid, successMsg(`Client created: ID=${c.id}, ${c.username}, ${formatDate(c.birthDate)}`));
-    } catch (e) { dom.showErr(rid, e); }
+        await api.myAccounts();
+        showScreen('client');
+        D.show('cl-nav-user', u);
+        await loadClientDashboard();
+    } catch (e) {
+        S.clear();
+        D.err('login-error', `Client "${u}" not found. Ask a banker to register you first.`);
+    }
 };
 
-// ---- Banker: delete client ----
-dom.get('btn-delete-client').onclick = async () => {
-    const username = dom.val('delete-username');
-    const rid = 'delete-client-result';
-    if (!username) { dom.showErr(rid, new Error('Username required.')); return; }
-    dom.showLoading(rid);
+// Banker login
+D.get('btn-login-banker').onclick = async () => {
+    const u = D.val('login-banker-user'), p = D.val('login-banker-pass');
+    if (!u || !p) { D.err('login-error', 'Enter username and password.'); return; }
+    D.load('login-error');
     try {
-        await api.deleteClient(username);
-        dom.show(rid, successMsg(`Client "${username}" deleted.`));
-    } catch (e) { dom.showErr(rid, e); }
+        const r = await api.bankerLogin(u, p);
+        S.setBanker(r.token);
+        showScreen('banker');
+        await loadBankerDashboard();
+    } catch (e) {
+        S.clear();
+        D.err('login-error', 'Invalid credentials. Demo: banker / banker123');
+    }
 };
 
-// ---- Banker: find clients ----
-const doFindClients = async (fromBirth, minBalance) => {
-    const rid = 'find-clients-result';
-    dom.showLoading(rid);
-    try {
-        const clients = await api.findClients(fromBirth, minBalance);
-        dom.show(rid, clientsToTable(clients));
-    } catch (e) { dom.showErr(rid, e); }
-};
-dom.get('btn-find-clients').onclick = () =>
-    doFindClients(dom.val('find-from-birth'), dom.val('find-min-balance'));
-dom.get('btn-find-all').onclick = () => doFindClients('', '');
+// Allow Enter key on login inputs
+['login-client-user', 'login-banker-user', 'login-banker-pass'].forEach(id => {
+    D.get(id).addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            if (S.role() === 'banker' || id.includes('banker')) D.get('btn-login-banker').click();
+            else D.get('btn-login-client').click();
+        }
+    });
+});
 
-// ---- Client: create account ----
-dom.get('btn-create-account').onclick = async () => {
-    const name = dom.val('acct-name');
-    const rid = 'create-account-result';
-    if (!name) { dom.showErr(rid, new Error('Account name required.')); return; }
-    dom.showLoading(rid);
-    try {
-        const a = await api.createAccount(name);
-        dom.show(rid, successMsg(`Account created: No.${a.accountNo} "${a.accountName}"`));
-    } catch (e) { dom.showErr(rid, e); }
-};
+/* =====================================================================
+ *  ORCHESTRATION: Client dashboard
+ * ===================================================================== */
 
-// ---- Client: deposit ----
-dom.get('btn-deposit').onclick = async () => {
-    const acct = dom.val('dep-acct-no');
-    const amt = dom.val('dep-amount');
-    const rid = 'deposit-result';
-    if (!acct || !amt) { dom.showErr(rid, new Error('Both fields required.')); return; }
-    dom.showLoading(rid);
+async function loadClientDashboard() {
     try {
-        await api.deposit(acct, amt);
-        dom.show(rid, successMsg(`Deposited ${amt} EUR to account ${acct}.`));
-    } catch (e) { dom.showErr(rid, e); }
-};
+        const [accounts, rules] = await Promise.all([api.myAccounts(), api.getRules()]);
+        D.show('cl-accounts-table', F.accountsTable(accounts));
+        D.show('cl-rates-table', F.ratesTable(rules));
+        D.show('cl-transfers-table', F.transfersTable(await api.myTransfers()));
+    } catch (e) { /* silently skip — user can retry */ }
+}
 
-// ---- Client: transfer ----
-dom.get('btn-transfer').onclick = async () => {
-    const src = dom.val('xfer-src');
-    const dst = dom.val('xfer-dst');
-    const amt = dom.val('xfer-amount');
-    const rid = 'transfer-result';
-    if (!src || !dst || !amt) { dom.showErr(rid, new Error('All fields required.')); return; }
-    dom.showLoading(rid);
+// Logout
+D.get('btn-cl-logout').onclick = () => { S.clear(); showScreen('login'); };
+
+// Refresh buttons
+D.get('btn-cl-refresh-accounts').onclick = loadClientDashboard;
+D.get('btn-cl-refresh-transfers').onclick = loadClientDashboard;
+
+// Open account
+D.get('btn-cl-create-account').onclick = async () => {
+    const n = D.val('cl-acct-name'), t = D.get('cl-acct-type').value;
+    const rid = 'cl-create-account-result';
+    if (!n) { D.err(rid, 'Account name required.'); return; }
+    D.load(rid);
     try {
-        await api.transfer(src, dst, amt);
-        dom.show(rid, successMsg(`Transferred ${amt} EUR from ${src} to ${dst}.`));
-    } catch (e) { dom.showErr(rid, e); }
+        const a = await api.createAccount(n, t);
+        D.ok(rid, `Account #${a.accountNo} "${a.accountName}" (${a.accountType}) opened.`);
+        loadClientDashboard();
+    } catch (e) { D.err(rid, e); }
 };
 
-// ---- Client: add manager ----
-dom.get('btn-add-manager').onclick = async () => {
-    const acct = dom.val('mgr-acct-no');
-    const mgr = dom.val('mgr-username');
-    const rid = 'add-manager-result';
-    if (!acct || !mgr) { dom.showErr(rid, new Error('Both fields required.')); return; }
-    dom.showLoading(rid);
+// Deposit
+D.get('btn-cl-deposit').onclick = async () => {
+    const a = D.val('cl-dep-acct'), amt = D.val('cl-dep-amount');
+    const rid = 'cl-deposit-result';
+    if (!a || !amt) { D.err(rid, 'Both fields required.'); return; }
+    D.load(rid);
     try {
-        const a = await api.addManager(acct, mgr);
-        dom.show(rid, successMsg(`"${mgr}" is now manager of account ${acct}.`));
-    } catch (e) { dom.showErr(rid, e); }
+        await api.deposit(a, amt);
+        D.ok(rid, `Deposited ${amt}€ to #${a}.`);
+        loadClientDashboard();
+    } catch (e) { D.err(rid, e); }
 };
 
-// ---- Client: accounts report ----
-dom.get('btn-report').onclick = async () => {
-    const rid = 'report-result';
-    dom.showLoading(rid);
+// Transfer
+D.get('btn-cl-transfer').onclick = async () => {
+    const src = D.val('cl-xfer-src'), dst = D.val('cl-xfer-dst'),
+          amt = D.val('cl-xfer-amount'), internal = D.checked('cl-xfer-internal');
+    const rid = 'cl-transfer-result';
+    if (!src || !dst || !amt) { D.err(rid, 'All fields required.'); return; }
+    D.load(rid);
     try {
-        const report = await api.accountsReport();
-        dom.show(rid, report);
-    } catch (e) { dom.showErr(rid, e); }
+        const r = await api.transfer(src, dst, amt, internal);
+        D.show(rid, F.ok(`Transferred ${amt}€ from #${src} to #${dst}.`) +
+            `<br>Source: ${F.m(r.sourceNewBalance)}€ → Dest: ${F.m(r.destNewBalance)}€` +
+            F.feeBreakdown(r));
+        loadClientDashboard();
+    } catch (e) { D.err(rid, e); }
+};
+
+// Add manager
+D.get('btn-cl-add-manager').onclick = async () => {
+    const a = D.val('cl-mgr-acct'), m = D.val('cl-mgr-user');
+    const rid = 'cl-add-manager-result';
+    if (!a || !m) { D.err(rid, 'Both fields required.'); return; }
+    D.load(rid);
+    try {
+        await api.addManager(a, m);
+        D.ok(rid, `"${m}" added as manager of #${a}.`);
+        loadClientDashboard();
+    } catch (e) { D.err(rid, e); }
+};
+
+/* =====================================================================
+ *  ORCHESTRATION: Banker dashboard
+ * ===================================================================== */
+
+async function loadBankerDashboard() {
+    D.show('bk-transfers-table', F.transfersTable(await api.allTransfers()));
+    loadBkRules();
+}
+
+// Logout
+D.get('btn-bk-logout').onclick = () => { S.clear(); showScreen('login'); };
+
+// Create client
+D.get('btn-bk-create-client').onclick = async () => {
+    const u = D.val('bk-create-user'), b = D.val('bk-create-birth');
+    const rid = 'bk-create-client-result';
+    if (!u || !b) { D.err(rid, 'Both fields required.'); return; }
+    D.load(rid);
+    try {
+        const c = await api.createClient(u, b);
+        D.ok(rid, `Client created: ID=${c.id}, ${c.username}, ${F.date(c.birthDate)}`);
+    } catch (e) { D.err(rid, e); }
+};
+
+// Delete client
+D.get('btn-bk-delete-client').onclick = async () => {
+    const u = D.val('bk-delete-user');
+    const rid = 'bk-delete-client-result';
+    if (!u) { D.err(rid, 'Username required.'); return; }
+    D.load(rid);
+    try { await api.deleteClient(u); D.ok(rid, `Client "${u}" deleted.`); }
+    catch (e) { D.err(rid, e); }
+};
+
+// Find clients
+const doFind = async (birth, bal) => {
+    const rid = 'bk-find-result';
+    D.load(rid);
+    try { D.show(rid, F.clientsTable(await api.findClients(birth, bal))); }
+    catch (e) { D.err(rid, e); }
+};
+D.get('btn-bk-find').onclick = () => doFind(D.val('bk-find-birth'), D.val('bk-find-balance'));
+D.get('btn-bk-find-all').onclick = () => doFind('', '');
+
+// Rules (banker — editable)
+async function loadBkRules() {
+    const rid = 'bk-rules-table';
+    D.load(rid);
+    try {
+        D.show(rid, F.rulesTable(await api.getRules()));
+        document.querySelectorAll('.rule-save-btn').forEach(btn => {
+            btn.onclick = async () => {
+                const k = btn.dataset.key;
+                const v = parseFloat(D.get('rv-' + k.replace(/\./g, '-')).value);
+                if (isNaN(v)) { alert('Invalid number'); return; }
+                try {
+                    await api.updateRule(k, v);
+                    btn.textContent = '✓'; btn.style.background = 'var(--success)';
+                    setTimeout(() => { btn.textContent = 'Save'; btn.style.background = ''; }, 1500);
+                } catch (e) { alert(e.message); }
+            };
+        });
+    } catch (e) { D.err(rid, e); }
+}
+D.get('btn-bk-rules').onclick = loadBkRules;
+
+// Accrue interest
+D.get('btn-bk-accrue').onclick = async () => {
+    const d = parseInt(D.val('bk-interest-days'));
+    const rid = 'bk-interest-result';
+    if (!d || d < 1) { D.err(rid, 'Days ≥ 1 required.'); return; }
+    D.load(rid);
+    try { D.show(rid, F.interestTable(await api.accrueInterest(d))); }
+    catch (e) { D.err(rid, e); }
+};
+
+// Refresh transfers
+D.get('btn-bk-transfers').onclick = async () => {
+    const rid = 'bk-transfers-table';
+    D.load(rid);
+    try { D.show(rid, F.transfersTable(await api.allTransfers())); }
+    catch (e) { D.err(rid, e); }
 };

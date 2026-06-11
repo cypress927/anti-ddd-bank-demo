@@ -1,5 +1,6 @@
 package bank.domain.decisions;
 
+import bank.domain.facts.AccountType;
 import bank.domain.facts.Amount;
 import org.junit.jupiter.api.Test;
 
@@ -7,21 +8,17 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Pure business function test — no mocks, no Spring, no database.
- * Each test: construct fixed-size Facts → call decide → assert plain Result.
  */
 class TransferDecisionTest {
 
     private static final Amount DEST_BALANCE = Amount.ofEuros(300);
+    private static final Amount ZERO_FEE = Amount.ZERO;
 
     @Test
-    void allowValidTransfer() {
+    void allowValidTransferChecking() {
         var facts = new TransferDecision.Facts(
-            Amount.ofEuros(100),  // amount
-            true,                 // hasAccessRight
-            Amount.ofEuros(500),  // source balance
-            true,                 // destination exists
-            DEST_BALANCE          // destination current balance
-        );
+            Amount.ofEuros(100), ZERO_FEE, true,
+            Amount.ofEuros(500), true, DEST_BALANCE, AccountType.CHECKING);
         var result = TransferDecision.decide(facts);
         assertTrue(result.allowed());
         assertEquals(400.0, result.newSourceBalance().toDouble(), 0.001);
@@ -31,7 +28,8 @@ class TransferDecisionTest {
     @Test
     void rejectZeroAmount() {
         var facts = new TransferDecision.Facts(
-            Amount.ZERO, true, Amount.ofEuros(500), true, DEST_BALANCE);
+            Amount.ZERO, ZERO_FEE, true, Amount.ofEuros(500),
+            true, DEST_BALANCE, AccountType.CHECKING);
         var result = TransferDecision.decide(facts);
         assertFalse(result.allowed());
         assertTrue(result.reason().contains("greater than 0"));
@@ -40,7 +38,8 @@ class TransferDecisionTest {
     @Test
     void rejectNegativeAmount() {
         var facts = new TransferDecision.Facts(
-            Amount.ofEuros(-10), true, Amount.ofEuros(500), true, DEST_BALANCE);
+            Amount.ofEuros(-10), ZERO_FEE, true, Amount.ofEuros(500),
+            true, DEST_BALANCE, AccountType.CHECKING);
         var result = TransferDecision.decide(facts);
         assertFalse(result.allowed());
     }
@@ -48,27 +47,28 @@ class TransferDecisionTest {
     @Test
     void rejectWhenNoAccessRight() {
         var facts = new TransferDecision.Facts(
-            Amount.ofEuros(100), false, Amount.ofEuros(500), true, DEST_BALANCE);
+            Amount.ofEuros(100), ZERO_FEE, false, Amount.ofEuros(500),
+            true, DEST_BALANCE, AccountType.CHECKING);
         var result = TransferDecision.decide(facts);
         assertFalse(result.allowed());
         assertTrue(result.reason().contains("access"));
     }
 
     @Test
-    void rejectWhenBelowMinimumBalance() {
-        // Source has 200 EUR, transfer 1500 EUR → new balance = -1300 < -1000 minimum
+    void rejectWhenBelowMinimumBalanceChecking() {
         var facts = new TransferDecision.Facts(
-            Amount.ofEuros(1500), true, Amount.ofEuros(200), true, DEST_BALANCE);
+            Amount.ofEuros(1500), ZERO_FEE, true, Amount.ofEuros(200),
+            true, DEST_BALANCE, AccountType.CHECKING);
         var result = TransferDecision.decide(facts);
         assertFalse(result.allowed());
         assertTrue(result.reason().contains("minimum balance"));
     }
 
     @Test
-    void allowExactlyAtMinimumBalance() {
-        // Minimum balance is -1000 EUR. Transfer from 0 to reach exactly -1000.
+    void allowExactlyAtMinimumBalanceChecking() {
         var facts = new TransferDecision.Facts(
-            Amount.ofEuros(1000), true, Amount.ZERO, true, DEST_BALANCE);
+            Amount.ofEuros(1000), ZERO_FEE, true, Amount.ZERO,
+            true, DEST_BALANCE, AccountType.CHECKING);
         var result = TransferDecision.decide(facts);
         assertTrue(result.allowed());
         assertEquals(-1000.0, result.newSourceBalance().toDouble(), 0.001);
@@ -78,25 +78,58 @@ class TransferDecisionTest {
     @Test
     void rejectUnknownDestination() {
         var facts = new TransferDecision.Facts(
-            Amount.ofEuros(100), true, Amount.ofEuros(500), false, Amount.ZERO);
+            Amount.ofEuros(100), ZERO_FEE, true, Amount.ofEuros(500),
+            false, Amount.ZERO, AccountType.CHECKING);
         var result = TransferDecision.decide(facts);
         assertFalse(result.allowed());
         assertTrue(result.reason().contains("does not exist"));
     }
 
     @Test
-    void minimumBalanceConstantIsCorrect() {
-        assertEquals(-1000.0, TransferDecision.MINIMUM_BALANCE.toDouble(), 0.001);
+    void savingsCannotOverdraw() {
+        var facts = new TransferDecision.Facts(
+            Amount.ofEuros(100), ZERO_FEE, true, Amount.ofEuros(50),
+            true, DEST_BALANCE, AccountType.SAVINGS);
+        var result = TransferDecision.decide(facts);
+        assertFalse(result.allowed());
+        assertTrue(result.reason().contains("Savings accounts cannot overdraw"));
     }
 
     @Test
-    void destinationBalanceIncreasesByTransferAmount() {
+    void savingsCanTransferExactBalance() {
         var facts = new TransferDecision.Facts(
-            Amount.ofEuros(250), true, Amount.ofEuros(1000),
-            true, Amount.ofEuros(500));
+            Amount.ofEuros(200), ZERO_FEE, true, Amount.ofEuros(200),
+            true, DEST_BALANCE, AccountType.SAVINGS);
         var result = TransferDecision.decide(facts);
         assertTrue(result.allowed());
-        assertEquals(750.0, result.newSourceBalance().toDouble(), 0.001);
-        assertEquals(750.0, result.newDestinationBalance().toDouble(), 0.001);
+        assertEquals(0.0, result.newSourceBalance().toDouble(), 0.001);
+    }
+
+    @Test
+    void feeIncreasesDeduction() {
+        var facts = new TransferDecision.Facts(
+            Amount.ofEuros(100), Amount.ofEuros(5), true, Amount.ofEuros(200),
+            true, DEST_BALANCE, AccountType.CHECKING);
+        var result = TransferDecision.decide(facts);
+        assertTrue(result.allowed());
+        // Source: 200 - 100 - 5 = 95
+        assertEquals(95.0, result.newSourceBalance().toDouble(), 0.001);
+        // Dest only receives transfer amount: 300 + 100 = 400
+        assertEquals(400.0, result.newDestinationBalance().toDouble(), 0.001);
+    }
+
+    @Test
+    void feeCausesRejectionInSavings() {
+        var facts = new TransferDecision.Facts(
+            Amount.ofEuros(100), Amount.ofEuros(1), true, Amount.ofEuros(100),
+            true, DEST_BALANCE, AccountType.SAVINGS);
+        var result = TransferDecision.decide(facts);
+        assertFalse(result.allowed());
+        assertTrue(result.reason().contains("cannot overdraw"));
+    }
+
+    @Test
+    void minimumBalanceConstantIsCorrect() {
+        assertEquals(-1000.0, TransferDecision.CHECKING_MIN_BALANCE.toDouble(), 0.001);
     }
 }

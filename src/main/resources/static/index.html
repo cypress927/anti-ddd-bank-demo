@@ -3,120 +3,182 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Bank Demo — Anti-OOP Architecture</title>
+<title>Bank Demo</title>
 <link rel="stylesheet" href="/app.css">
 </head>
 <body>
 
-<header>
-    <h1>🏦 Bank Demo</h1>
-    <span class="subtitle">Pure-function architecture · JPA + SQLite</span>
-</header>
-
-<main>
-    <!-- ===== Client Identity (shared by all client operations) ===== -->
-    <section class="card" id="identity-card">
-        <h2>👤 Client Identity</h2>
-        <p class="hint">Set your username here. All /client operations send it as <code>X-Username</code> header.</p>
-        <div class="form-row">
-            <input type="text" id="my-username" placeholder="Your username (e.g. jack)" autocomplete="off">
+<!-- ======================================================================
+     SCREEN: LOGIN
+     ====================================================================== -->
+<div id="screen-login" class="screen active">
+    <div class="login-container">
+        <div class="login-header">
+            <h1>🏦 Bank Demo</h1>
+            <p>Pure-function architecture · Checking &amp; Savings</p>
         </div>
-    </section>
+        <div class="login-roles">
+            <button class="login-role active" data-role="client">👤 Client</button>
+            <button class="login-role" data-role="banker">🏛️ Banker</button>
+        </div>
+        <div id="login-form-client" class="login-form active">
+            <label>Username</label>
+            <input type="text" id="login-client-user" placeholder="Your username" autocomplete="off">
+            <button id="btn-login-client">Sign In</button>
+        </div>
+        <div id="login-form-banker" class="login-form">
+            <label>Username</label>
+            <input type="text" id="login-banker-user" placeholder="banker" autocomplete="off">
+            <label>Password</label>
+            <input type="password" id="login-banker-pass" placeholder="••••••••">
+            <button id="btn-login-banker">Sign In</button>
+        </div>
+        <div id="login-error"></div>
+    </div>
+</div>
 
-    <!-- ===== Banker Operations ===== -->
-    <section class="card">
-        <h2>🏛️ Banker — Client Management</h2>
+<!-- ======================================================================
+     SCREEN: CLIENT DASHBOARD
+     ====================================================================== -->
+<div id="screen-client" class="screen">
+    <nav class="topbar client">
+        <span class="topbar-title">🏦 Bank</span>
+        <span class="topbar-user">👤 <span id="cl-nav-user"></span></span>
+        <button id="btn-cl-logout" class="secondary small">Logout</button>
+    </nav>
+    <main>
+        <!-- My Accounts -->
+        <div class="card">
+            <h2>💳 My Accounts <button id="btn-cl-refresh-accounts" class="secondary small">Refresh</button></h2>
+            <div class="result" id="cl-accounts-table"></div>
+        </div>
 
-        <!-- Create client -->
-        <div class="op">
-            <h3>Create Client</h3>
-            <div class="form-row">
-                <input type="text" id="create-username" placeholder="Username (e.g. jack)">
-                <input type="text" id="create-birthdate" placeholder="Birth date (yyyy-mm-dd)">
-                <button id="btn-create-client">Create</button>
+        <!-- Current Rates -->
+        <div class="card rates-card">
+            <h2>📈 Rates &amp; Fees</h2>
+            <div class="result" id="cl-rates-table"></div>
+        </div>
+
+        <!-- Operations -->
+        <div class="card">
+            <h2>🔧 Operations</h2>
+            <div class="op">
+                <h3>Open Account</h3>
+                <div class="form-row">
+                    <input type="text" id="cl-acct-name" placeholder="Account name">
+                    <select id="cl-acct-type">
+                        <option value="CHECKING">Checking</option>
+                        <option value="SAVINGS">Savings</option>
+                    </select>
+                    <button id="btn-cl-create-account">Open</button>
+                </div>
+                <div class="result" id="cl-create-account-result"></div>
             </div>
-            <div class="result" id="create-client-result"></div>
-        </div>
-
-        <!-- Delete client -->
-        <div class="op">
-            <h3>Delete Client</h3>
-            <div class="form-row">
-                <input type="text" id="delete-username" placeholder="Username to delete">
-                <button id="btn-delete-client">Delete</button>
+            <div class="op">
+                <h3>Deposit</h3>
+                <div class="form-row">
+                    <input type="number" id="cl-dep-acct" placeholder="Account number" min="1">
+                    <input type="number" id="cl-dep-amount" placeholder="Amount (EUR)" min="0.01" step="0.01">
+                    <button id="btn-cl-deposit">Deposit</button>
+                </div>
+                <div class="result" id="cl-deposit-result"></div>
             </div>
-            <div class="result" id="delete-client-result"></div>
-        </div>
-
-        <!-- List / search clients -->
-        <div class="op">
-            <h3>Find Clients</h3>
-            <div class="form-row">
-                <input type="text" id="find-from-birth" placeholder="From birth (yyyy-mm-dd, optional)">
-                <input type="text" id="find-min-balance" placeholder="Min balance (optional)">
-                <button id="btn-find-clients">Search</button>
-                <button id="btn-find-all" class="secondary">List All</button>
+            <div class="op">
+                <h3>Transfer</h3>
+                <div class="form-row">
+                    <input type="number" id="cl-xfer-src" placeholder="From account" min="1">
+                    <input type="number" id="cl-xfer-dst" placeholder="To account" min="1">
+                    <input type="number" id="cl-xfer-amount" placeholder="Amount (EUR)" min="0.01" step="0.01">
+                    <label class="checkbox-label"><input type="checkbox" id="cl-xfer-internal" checked> Internal</label>
+                    <button id="btn-cl-transfer">Transfer</button>
+                </div>
+                <div class="result" id="cl-transfer-result"></div>
             </div>
-            <div class="result" id="find-clients-result"></div>
-        </div>
-    </section>
-
-    <!-- ===== Client Operations ===== -->
-    <section class="card">
-        <h2>💳 Client — Account Operations</h2>
-
-        <!-- Create account -->
-        <div class="op">
-            <h3>Create Account</h3>
-            <div class="form-row">
-                <input type="text" id="acct-name" placeholder="Account name (e.g. My Savings)">
-                <button id="btn-create-account">Create</button>
+            <div class="op">
+                <h3>Add Account Manager</h3>
+                <div class="form-row">
+                    <input type="number" id="cl-mgr-acct" placeholder="Account number" min="1">
+                    <input type="text" id="cl-mgr-user" placeholder="Manager username">
+                    <button id="btn-cl-add-manager">Add</button>
+                </div>
+                <div class="result" id="cl-add-manager-result"></div>
             </div>
-            <div class="result" id="create-account-result"></div>
         </div>
 
-        <!-- Deposit -->
-        <div class="op">
-            <h3>Deposit</h3>
-            <div class="form-row">
-                <input type="number" id="dep-acct-no" placeholder="Account number" min="1">
-                <input type="number" id="dep-amount" placeholder="Amount (EUR)" min="0.01" step="0.01">
-                <button id="btn-deposit">Deposit</button>
+        <!-- My Transfers -->
+        <div class="card">
+            <h2>📋 My Transfers <button id="btn-cl-refresh-transfers" class="secondary small">Refresh</button></h2>
+            <div class="result" id="cl-transfers-table"></div>
+        </div>
+    </main>
+</div>
+
+<!-- ======================================================================
+     SCREEN: BANKER DASHBOARD
+     ====================================================================== -->
+<div id="screen-banker" class="screen">
+    <nav class="topbar banker">
+        <span class="topbar-title">🏦 Bank</span>
+        <span class="topbar-role">🏛️ Banker</span>
+        <button id="btn-bk-logout" class="secondary small">Logout</button>
+    </nav>
+    <main>
+        <!-- Client Management -->
+        <div class="card">
+            <h2>📋 Client Management</h2>
+            <div class="op">
+                <h3>Register Client</h3>
+                <div class="form-row">
+                    <input type="text" id="bk-create-user" placeholder="Username">
+                    <input type="text" id="bk-create-birth" placeholder="Birth (yyyy-mm-dd)">
+                    <button id="btn-bk-create-client">Create</button>
+                </div>
+                <div class="result" id="bk-create-client-result"></div>
             </div>
-            <div class="result" id="deposit-result"></div>
-        </div>
-
-        <!-- Transfer -->
-        <div class="op">
-            <h3>Transfer</h3>
-            <div class="form-row">
-                <input type="number" id="xfer-src" placeholder="Source account no." min="1">
-                <input type="number" id="xfer-dst" placeholder="Destination account no." min="1">
-                <input type="number" id="xfer-amount" placeholder="Amount (EUR)" min="0.01" step="0.01">
-                <button id="btn-transfer">Transfer</button>
+            <div class="op">
+                <h3>Delete Client</h3>
+                <div class="form-row">
+                    <input type="text" id="bk-delete-user" placeholder="Username">
+                    <button id="btn-bk-delete-client" class="danger">Delete</button>
+                </div>
+                <div class="result" id="bk-delete-client-result"></div>
             </div>
-            <div class="result" id="transfer-result"></div>
-        </div>
-
-        <!-- Add account manager -->
-        <div class="op">
-            <h3>Add Account Manager</h3>
-            <div class="form-row">
-                <input type="number" id="mgr-acct-no" placeholder="Account number" min="1">
-                <input type="text" id="mgr-username" placeholder="Manager username">
-                <button id="btn-add-manager">Add Manager</button>
+            <div class="op">
+                <h3>Find Clients</h3>
+                <div class="form-row">
+                    <input type="text" id="bk-find-birth" placeholder="From birth (optional)">
+                    <input type="text" id="bk-find-balance" placeholder="Min balance (optional)">
+                    <button id="btn-bk-find">Search</button>
+                    <button id="btn-bk-find-all" class="secondary">All</button>
+                </div>
+                <div class="result" id="bk-find-result"></div>
             </div>
-            <div class="result" id="add-manager-result"></div>
         </div>
 
-        <!-- Accounts report -->
-        <div class="op">
-            <h3>My Accounts Report</h3>
-            <button id="btn-report">Show Report</button>
-            <pre class="result" id="report-result"></pre>
+        <!-- System -->
+        <div class="card">
+            <h2>📊 System</h2>
+            <div class="op">
+                <h3>All Transfers <button id="btn-bk-transfers" class="secondary small">Refresh</button></h3>
+                <div class="result" id="bk-transfers-table"></div>
+            </div>
+            <div class="op">
+                <h3>Accrue Interest</h3>
+                <div class="form-row">
+                    <input type="number" id="bk-interest-days" value="30" min="1" style="width:90px;">
+                    <button id="btn-bk-accrue">Accrue</button>
+                </div>
+                <div class="result" id="bk-interest-result"></div>
+            </div>
         </div>
-    </section>
-</main>
+
+        <!-- Rules -->
+        <div class="card">
+            <h2>⚙️ Bank Rules <button id="btn-bk-rules" class="secondary small">Refresh</button></h2>
+            <div class="result" id="bk-rules-table"></div>
+        </div>
+    </main>
+</div>
 
 <script src="/app.js"></script>
 </body>

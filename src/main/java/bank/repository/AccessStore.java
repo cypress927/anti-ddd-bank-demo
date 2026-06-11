@@ -2,6 +2,7 @@ package bank.repository;
 
 import bank.domain.facts.AccessFact;
 import bank.domain.facts.AccountNo;
+import bank.domain.facts.AccountType;
 import bank.domain.facts.Amount;
 import bank.repository.entity.AccessEntity;
 import bank.repository.entity.AccountEntity;
@@ -70,7 +71,8 @@ public class AccessStore {
     // ---- side-effect commands ----
 
     public AccessFact save(long clientId, String clientUsername, boolean isOwner,
-                            AccountNo accountNo, String accountName, Amount accountBalance) {
+                            AccountNo accountNo, String accountName, Amount accountBalance,
+                            AccountType accountType) {
         // Load referenced entities (must exist — caller ensures this)
         var client = clientRepo.findById(clientId).orElseThrow();
         var account = accountRepo.findByAccountNo(accountNo.number()).orElseThrow();

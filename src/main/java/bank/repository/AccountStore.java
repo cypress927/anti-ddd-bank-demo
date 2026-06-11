@@ -2,6 +2,7 @@ package bank.repository;
 
 import bank.domain.facts.AccountFact;
 import bank.domain.facts.AccountNo;
+import bank.domain.facts.AccountType;
 import bank.domain.facts.Amount;
 import bank.repository.entity.AccountEntity;
 import org.springframework.stereotype.Component;
@@ -34,15 +35,27 @@ public class AccountStore {
         return repo.findByAccountNo(accountNo.number()).isPresent();
     }
 
+    public List<AccountFact> findAll() {
+        return repo.findAll().stream()
+            .map(AccountEntity::toFact)
+            .toList();
+    }
+
+    public List<AccountFact> findAllSavingsAccounts() {
+        return repo.findAll().stream()
+            .map(AccountEntity::toFact)
+            .filter(a -> a.accountType() == AccountType.SAVINGS)
+            .toList();
+    }
+
     // ---- side-effect commands ----
 
-    public AccountFact save(String name) {
-        var entity = new AccountEntity(name);
+    public AccountFact save(String name, AccountType accountType) {
+        var entity = new AccountEntity(name, accountType);
         return repo.save(entity).toFact();
     }
 
-    /** Update only the balance — pure computation already decided the new value.
-     *  Does a fresh SQL SELECT to return updated state. */
+    /** Update only the balance — pure computation already decided the new value. */
     public AccountFact updateBalance(AccountNo accountNo, Amount newBalance) {
         int rows = repo.updateBalance(accountNo.number(), newBalance.cents());
         if (rows == 0) {
@@ -61,21 +74,5 @@ public class AccountStore {
 
     public void deleteAll() {
         repo.deleteAll();
-    }
-
-    /** Rich accounts: balance >= minBalance, ordered by balance desc. */
-    public List<Map.Entry<Long, AccountFact>> findRichAccounts(Amount minBalance) {
-        // We don't use this directly anymore — see AccessStore.findFullAccounts
-        var results = new ArrayList<Map.Entry<Long, AccountFact>>();
-        var all = repo.findAll();
-        all.stream()
-            .filter(a -> a.getBalanceCents() >= minBalance.cents())
-            .sorted((a, b) -> {
-                int cmp = Long.compare(b.getBalanceCents(), a.getBalanceCents());
-                if (cmp != 0) return cmp;
-                return Long.compare(b.getAccountNo(), a.getAccountNo());
-            })
-            .forEach(a -> results.add(Map.entry(a.getAccountNo(), a.toFact())));
-        return results;
     }
 }
