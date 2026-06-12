@@ -1,8 +1,8 @@
 package bank.repository;
 
+import bank.domain.decisions.TransferDecision;
 import bank.domain.facts.AccountNo;
 import bank.domain.facts.Amount;
-import bank.domain.decisions.TransferFeeDecision;
 import bank.repository.entity.TransferLogEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,14 +36,14 @@ public class TransferLogStore {
 
     /** Record a completed transfer with its fee breakdown. */
     public void record(AccountNo source, AccountNo destination, Amount amount,
-                        TransferFeeDecision.Result feeResult, boolean isInternal) {
+                        TransferDecision.Result result, boolean isInternal) {
         var entity = new TransferLogEntity(
             source.number(),
             destination.number(),
             amount.cents(),
-            feeResult.baseFee().cents(),
-            feeResult.excessPenalty().cents(),
-            feeResult.transactionTax().cents(),
+            result.baseFee().cents(),
+            result.excessPenalty().cents(),
+            result.transactionTax().cents(),
             isInternal,
             LocalDate.now()
         );

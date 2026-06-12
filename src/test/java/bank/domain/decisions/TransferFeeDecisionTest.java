@@ -11,8 +11,8 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class TransferFeeDecisionTest {
 
-    private static final TransferFeeDecision.FeeRules DEFAULT_RULES =
-        new TransferFeeDecision.FeeRules(0.50, 1.00, 0.05, 1.00, 50.00, 10_000.0, 0.1, 6, 2.00);
+    private static final TransferDecision.FeeRules DEFAULT_RULES =
+        new TransferDecision.FeeRules(0.50, 1.00, 0.05, 1.00, 50.00, 10_000.0, 0.1, 6, 2.00);
 
     @Test
     void internalTransferHasFlatFee() {
@@ -43,7 +43,7 @@ class TransferFeeDecisionTest {
 
     @Test
     void externalFeeClampedToMaximum() {
-        var rules = new TransferFeeDecision.FeeRules(0.50, 1.00, 10.0, 1.00, 50.00, 10_000.0, 0.1, 6, 2.00);
+        var rules = new TransferDecision.FeeRules(0.50, 1.00, 10.0, 1.00, 50.00, 10_000.0, 0.1, 6, 2.00);
         var facts = new TransferFeeDecision.Facts(
             Amount.ofEuros(10000), false, AccountType.CHECKING, 0, rules);
         var result = TransferFeeDecision.decide(facts);
@@ -100,7 +100,7 @@ class TransferFeeDecisionTest {
 
     @Test
     void configurableFreeTransferCountIsUsed() {
-        var rules = new TransferFeeDecision.FeeRules(0.50, 1.00, 0.05, 1.00, 50.00, 10_000.0, 0.1, 3, 5.00);
+        var rules = new TransferDecision.FeeRules(0.50, 1.00, 0.05, 1.00, 50.00, 10_000.0, 0.1, 3, 5.00);
         var facts = new TransferFeeDecision.Facts(
             Amount.ofEuros(100), true, AccountType.SAVINGS, 3, rules);
         var result = TransferFeeDecision.decide(facts);
@@ -109,7 +109,7 @@ class TransferFeeDecisionTest {
 
     @Test
     void configurableMinMaxExternalFeeIsUsed() {
-        var rules = new TransferFeeDecision.FeeRules(0.50, 1.00, 5.0, 0.50, 20.00, 10_000.0, 0.1, 6, 2.00);
+        var rules = new TransferDecision.FeeRules(0.50, 1.00, 5.0, 0.50, 20.00, 10_000.0, 0.1, 6, 2.00);
         var facts = new TransferFeeDecision.Facts(
             Amount.ofEuros(1000), false, AccountType.CHECKING, 0, rules);
         var result = TransferFeeDecision.decide(facts);

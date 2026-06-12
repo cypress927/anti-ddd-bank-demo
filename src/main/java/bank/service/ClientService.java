@@ -3,7 +3,6 @@ package bank.service;
 import bank.domain.decisions.AddAccountManagerDecision;
 import bank.domain.decisions.DepositDecision;
 import bank.domain.decisions.TransferDecision;
-import bank.domain.decisions.TransferFeeDecision;
 import bank.domain.facts.AccountFact;
 import bank.domain.facts.AccountNo;
 import bank.domain.facts.AccountType;
@@ -81,8 +80,9 @@ public class ClientService {
     // ---- transfer (with fees) ----
 
     /**
-     * Complete transfer with fee breakdown returned for display.
-     * Flow: load facts → compute fees → decide transfer → execute effects.
+     * Complete transfer — load facts, call the fat core once, execute effects.
+     * Fee calculation is composed internally by {@link TransferDecision}; the
+     * orchestration does not know about the fee-computation step.
      */
     public Map<String, Object> transfer(String username, AccountNo source,
                                          AccountNo destination, Amount amount,
@@ -90,7 +90,7 @@ public class ClientService {
         var client = clientStore.findByUsername(username)
             .orElseThrow(() -> new NoSuchElementException("Client not found: " + username));
 
-        // 1. Prepare facts
+        // 1. Prepare all raw facts
         var srcOpt = accountStore.findByNo(source);
         if (srcOpt.isEmpty()) {
             throw new BusinessException("Source account does not exist: " + source);
@@ -99,12 +99,9 @@ public class ClientService {
         var hasAccessRight = accessStore.findByClientAndAccount(client.id(), source).isPresent();
         var destOpt = accountStore.findByNo(destination);
         var destBalance = destOpt.map(AccountFact::balance).orElse(Amount.ZERO);
-
-        // 2. Compute fees (pure function)
         int monthlyCount = transferLogStore.countThisMonth(source);
         var rules = bankRuleStore.getAll();
-        // Rules are always seeded — missing key is a data integrity error
-        var feeRules = new TransferFeeDecision.FeeRules(
+        var feeRules = new TransferDecision.FeeRules(
             requireRule(rules, "transfer.fee.internal"),
             requireRule(rules, "transfer.fee.external.flat"),
             requireRule(rules, "transfer.fee.external.percent"),
@@ -115,32 +112,29 @@ public class ClientService {
             (int) requireRule(rules, "transfer.savings.free.count"),
             requireRule(rules, "transfer.savings.excess.penalty")
         );
-        var feeFacts = new TransferFeeDecision.Facts(
-            amount, isInternal, sourceAccount.accountType(), monthlyCount, feeRules);
-        var feeResult = TransferFeeDecision.decide(feeFacts);
 
-        // 3. Decide transfer (pure function — uses total fee)
-        var transferFacts = new TransferDecision.Facts(
-            amount, feeResult.totalFee(), hasAccessRight, sourceAccount.balance(),
-            destOpt.isPresent(), destBalance, sourceAccount.accountType());
-        var transferResult = TransferDecision.decide(transferFacts);
-        if (!transferResult.allowed()) {
-            throw new BusinessException(transferResult.reason());
+        // 2. One pure-function call — fees composed internally
+        var facts = new TransferDecision.Facts(
+            amount, isInternal, sourceAccount.accountType(), monthlyCount, feeRules,
+            hasAccessRight, sourceAccount.balance(), destOpt.isPresent(), destBalance);
+        var result = TransferDecision.decide(facts);
+        if (!result.allowed()) {
+            throw new BusinessException(result.reason());
         }
 
-        // 4. Execute effects
-        accountStore.updateBalance(sourceAccount, transferResult.newSourceBalance());
-        accountStore.updateBalance(destOpt.get(), transferResult.newDestinationBalance());
-        transferLogStore.record(source, destination, amount, feeResult, isInternal);
+        // 3. Execute effects
+        accountStore.updateBalance(sourceAccount, result.newSourceBalance());
+        accountStore.updateBalance(destOpt.get(), result.newDestinationBalance());
+        transferLogStore.record(source, destination, amount, result, isInternal);
 
-        // Return complete breakdown for UI display
+        // 4. Response — all fields from the single result
         Map<String, Object> response = new LinkedHashMap<>();
-        response.put("sourceNewBalance", transferResult.newSourceBalance().toDouble());
-        response.put("destNewBalance", transferResult.newDestinationBalance().toDouble());
-        response.put("baseFee", feeResult.baseFee().toDouble());
-        response.put("excessPenalty", feeResult.excessPenalty().toDouble());
-        response.put("transactionTax", feeResult.transactionTax().toDouble());
-        response.put("totalFee", feeResult.totalFee().toDouble());
+        response.put("sourceNewBalance", result.newSourceBalance().toDouble());
+        response.put("destNewBalance", result.newDestinationBalance().toDouble());
+        response.put("baseFee", result.baseFee().toDouble());
+        response.put("excessPenalty", result.excessPenalty().toDouble());
+        response.put("transactionTax", result.transactionTax().toDouble());
+        response.put("totalFee", result.totalFee().toDouble());
         response.put("isInternal", isInternal);
         return response;
     }
